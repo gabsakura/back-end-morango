@@ -4,13 +4,20 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
+const crypto = require('crypto'); // Para gerar segredo aleatório
 
 const app = express();
 const port = 3000;
-const SECRET_KEY = '123456'; // Troque por uma chave mais segura
+
+let SECRET_KEY = generateSecretKey(); // Gera um segredo inicial aleatório
 
 app.use(bodyParser.json());
 app.use(cors()); // Permitir todas as origens
+
+// Função para gerar uma chave secreta aleatória
+function generateSecretKey() {
+  return crypto.randomBytes(64).toString('hex');
+}
 
 // Configurar o banco de dados SQLite
 const db = new sqlite3.Database('./strawberry-clicker.db');
@@ -57,38 +64,76 @@ db.serialize(() => {
     }
   });
 
-
   // Inserir itens de morango (upgrades)
-  const stmt = db.prepare(`INSERT INTO strawberries (name, cost, multiplier) VALUES (?, ?, ?)`);
-  stmt.run("Morangos Comuns", 10, 1);
-  stmt.run("Morangos Doces", 20, 2);
-  stmt.run("Morangos de Ouro", 50, 5);
-  stmt.run("Morangos Raros", 100, 10);
-  stmt.run("Morangos Lendários", 200, 20);
-  stmt.run("Morangos Celestiais", 500, 50);
+   const stmt = db.prepare(`INSERT INTO strawberries (name, cost, multiplier) VALUES (?, ?, ?)`);
+  
+  stmt.run("Morangos Comuns", 10, 1, function (err) {
+    if (err) {
+      console.error('Erro ao inserir Morangos Comuns:', err);
+    } else {
+      console.log('Morangos Comuns inserido com ID:', this.lastID);
+    }
+  });
+  
+  stmt.run("Morangos Doces", 20, 2, function (err) {
+    if (err) {
+      console.error('Erro ao inserir Morangos Doces:', err);
+    } else {
+      console.log('Morangos Doces inserido com ID:', this.lastID);
+    }
+  });
+  
+  stmt.run("Morangos de Ouro", 50, 5, function (err) {
+    if (err) {
+      console.error('Erro ao inserir Morangos de Ouro:', err);
+    } else {
+      console.log('Morangos de Ouro inserido com ID:', this.lastID);
+    }
+  });
+  
+  stmt.run("Morangos Raros", 100, 10, function (err) {
+    if (err) {
+      console.error('Erro ao inserir Morangos Raros:', err);
+    } else {
+      console.log('Morangos Raros inserido com ID:', this.lastID);
+    }
+  });
+  
+  stmt.run("Morangos Lendários", 200, 20, function (err) {
+    if (err) {
+      console.error('Erro ao inserir Morangos Lendários:', err);
+    } else {
+      console.log('Morangos Lendários inserido com ID:', this.lastID);
+    }
+  });
+  
+  stmt.run("Morangos Celestiais", 500, 50, function (err) {
+    if (err) {
+      console.error('Erro ao inserir Morangos Celestiais:', err);
+    } else {
+      console.log('Morangos Celestiais inserido com ID:', this.lastID);
+    }
+  });
+  
   stmt.finalize();
 });
 
-// Rota de registro de usuário
 // Rota de registro de usuário
 app.post('/register', (req, res) => {
   const { username, password } = req.body;
   const hashedPassword = bcrypt.hashSync(password, 8);
 
-  // Log para ver se os dados do request estão corretos
   console.log("Dados de registro:", username, password);
 
-  db.run(`INSERT INTO users (username, password) VALUES (?, ?)`, [username, hashedPassword], function(err) {
+  db.run(`INSERT INTO users (username, password) VALUES (?, ?)`, [username, hashedPassword], function (err) {
     if (err) {
-      console.error("Erro ao registrar usuário:", err.message); // Adicione um log para verificar o erro
+      console.error("Erro ao registrar usuário:", err.message);
       return res.status(500).send("Erro ao registrar usuário.");
     }
 
-    // Log para ver se o ID foi gerado corretamente
     console.log("Usuário registrado com sucesso, ID:", this.lastID);
 
-    // Inserir progresso inicial do usuário
-    db.run(`INSERT INTO user_progress (user_id, strawberries, upgrades) VALUES (?, ?, ?)`, [this.lastID, 0, '[]'], function(err) {
+    db.run(`INSERT INTO user_progress (user_id, strawberries, upgrades) VALUES (?, ?, ?)`, [this.lastID, 0, '[]'], function (err) {
       if (err) {
         console.error("Erro ao inicializar progresso do usuário:", err.message);
         return res.status(500).send("Erro ao inicializar progresso do usuário.");
@@ -97,7 +142,6 @@ app.post('/register', (req, res) => {
     });
   });
 });
-
 
 // Rota de login de usuário
 app.post('/login', (req, res) => {
@@ -108,10 +152,19 @@ app.post('/login', (req, res) => {
   }
 
   db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
-    if (err || !user || !bcrypt.compareSync(password, user.password)) {
+    if (err || !user) {
       return res.status(401).send("Login inválido.");
     }
 
+    const passwordIsValid = bcrypt.compareSync(password, user.password);
+    if (!passwordIsValid) {
+      return res.status(401).send("Login inválido.");
+    }
+
+    // Gera um novo segredo sempre que o usuário faz login
+    SECRET_KEY = generateSecretKey();
+
+    // Gerar o token JWT
     const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: 86400 }); // 24 horas
     res.status(200).send({ auth: true, token });
   });
@@ -120,35 +173,45 @@ app.post('/login', (req, res) => {
 // Middleware de autenticação JWT
 function verifyToken(req, res, next) {
   const token = req.headers['x-access-token'];
-  if (!token) return res.status(403).send({ auth: false, message: 'Nenhum token fornecido.' });
+  if (!token) {
+    console.log("Nenhum token fornecido.");
+    return res.status(403).send({ auth: false, message: 'Nenhum token fornecido.' });
+  }
 
   jwt.verify(token, SECRET_KEY, (err, decoded) => {
-    if (err) return res.status(500).send({ auth: false, message: 'Falha na autenticação do token.' });
+    if (err) {
+      console.log("Erro na verificação do token:", err);
+      return res.status(500).send({ auth: false, message: 'Falha na autenticação do token.' });
+    }
 
     req.userId = decoded.id;
     next();
   });
 }
 
-// Rota para obter progresso do jogador
-app.get('/progress', verifyToken, (req, res) => {
-  db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, progress) => {
-    if (err || !progress) {
-      return res.status(500).send("Erro ao buscar progresso.");
+// Rota para obter informações do usuário
+app.get('/profile', verifyToken, (req, res) => {
+  db.get(`SELECT username FROM users WHERE id = ?`, [req.userId], (err, user) => {
+    if (err || !user) {
+      return res.status(500).send("Erro ao buscar informações do usuário.");
     }
-    res.status(200).send(progress);
+    res.status(200).send({ username: user.username });
   });
 });
 
 // Rota para colher morango (equivalente a /morangos/click)
-app.post('/click', verifyToken, (req, res) => {
-  db.get(`SELECT strawberries FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
+app.post('/harvest', verifyToken, (req, res) => {
+  db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
     if (err || !row) {
       return res.status(500).send("Erro ao colher morangos.");
     }
 
-    const newCount = row.strawberries + 1; // Aumenta o número de morangos em 1
-    db.run(`UPDATE user_progress SET strawberries = ? WHERE user_id = ?`, [newCount, req.userId], function(err) {
+    let upgrades = JSON.parse(row.upgrades);
+    let totalMultiplier = upgrades.reduce((sum, upgrade) => sum + upgrade.multiplier, 0);
+    let increment = totalMultiplier || 1; // Se não tiver upgrades, incrementa em 1
+
+    const newCount = row.strawberries + increment;
+    db.run(`UPDATE user_progress SET strawberries = ? WHERE user_id = ?`, [newCount, req.userId], function (err) {
       if (err) {
         return res.status(500).send("Erro ao atualizar morangos.");
       }
@@ -175,25 +238,21 @@ app.post('/buy', verifyToken, (req, res) => {
         return res.status(500).send("Erro ao buscar progresso do jogador.");
       }
 
-      // Verificar se o jogador tem morangos suficientes
       if (progress.strawberries < strawberry.cost) {
         return res.status(400).send("Morango insuficiente para comprar esse upgrade.");
       }
 
-      // Atualizar o número de morangos
       const newStrawberries = progress.strawberries - strawberry.cost;
-
-      // Atualizar lista de upgrades
       let upgrades = JSON.parse(progress.upgrades);
       upgrades.push(strawberry);
 
       db.run(`UPDATE user_progress SET strawberries = ?, upgrades = ? WHERE user_id = ?`,
-        [newStrawberries, JSON.stringify(upgrades), req.userId], function(err) {
+        [newStrawberries, JSON.stringify(upgrades), req.userId], function (err) {
           if (err) {
             return res.status(500).send("Erro ao atualizar progresso.");
           }
           res.status(200).send({ strawberries: newStrawberries, upgrades });
-      });
+        });
     });
   });
 });
