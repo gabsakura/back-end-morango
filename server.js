@@ -107,7 +107,15 @@ app.post('/register', (req, res) => {
     });
   });
 });
-
+app.get('/profile', verifyToken, (req, res) => {
+  const { username, } = req.body;
+  db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
+    if (err || !users) {
+      return res.status(500).send("Erro ao buscar informações do usuário.");
+    }
+    res.status(200).send({ username: user.username });
+  });
+});
 // Rota de login de usuário
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
@@ -173,21 +181,21 @@ app.post('/harvest', verifyToken, (req, res) => {
 app.post('/buy', verifyToken, (req, res) => {
   const { id } = req.body;
   const userId = req.userId; // Corrigido para req.userId
-  
+
   db.get("SELECT * FROM strawberries WHERE id = ?", [id], (err, upgrade) => { // Corrigido para 'strawberries'
     if (err || !upgrade) {
       return res.status(404).send({ error: "Upgrade não encontrado" });
     }
-    
+
     db.get("SELECT strawberries FROM user_progress WHERE user_id = ?", [userId], (err, user) => {
       if (err || !user) {
         return res.status(500).send({ error: "Erro ao buscar morangos do usuário" });
       }
-      
+
       if (user.strawberries < upgrade.cost) {
         return res.status(400).send({ error: "Morangos insuficientes" });
       }
-      
+
       // Atualiza os morangos e o upgrade do usuário
       db.run("UPDATE user_progress SET strawberries = strawberries - ? WHERE user_id = ?", [upgrade.cost, userId], (err) => {
         if (err) {
