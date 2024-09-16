@@ -21,7 +21,6 @@ function generateSecretKey() {
 
 // Configurar o banco de dados SQLite
 const db = new sqlite3.Database('./strawberry-clicker.db');
-
 db.serialize(() => {
   // Criar tabela de usuários
   db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -36,7 +35,7 @@ db.serialize(() => {
     }
   });
 
-  // Criar tabela de morangos
+  // Criar tabela de morangos (upgrades)
   db.run(`CREATE TABLE IF NOT EXISTS strawberries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
@@ -52,7 +51,7 @@ db.serialize(() => {
 
   // Criar tabela de progresso do usuário
   db.run(`CREATE TABLE IF NOT EXISTS user_progress (
-    user_id INTEGER,
+    user_id INTEGER PRIMARY KEY,
     strawberries INTEGER DEFAULT 0,
     upgrades TEXT DEFAULT '[]',
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -64,74 +63,40 @@ db.serialize(() => {
     }
   });
 
-  // Inserir itens de morango (upgrades)
-   const stmt = db.prepare(`INSERT INTO strawberries (name, cost, multiplier) VALUES (?, ?, ?)`);
-  
-  stmt.run("Morangos Comuns", 10, 1, function (err) {
+  // Verifica se já há upgrades no banco antes de adicionar
+  db.get(`SELECT COUNT(*) as count FROM strawberries`, (err, row) => {
     if (err) {
-      console.error('Erro ao inserir Morangos Comuns:', err);
+      console.error('Erro ao verificar a tabela strawberries:', err);
+    } else if (row.count === 0) {
+      // Se a tabela estiver vazia, insere os upgrades
+      const stmt = db.prepare(`INSERT INTO strawberries (name, cost, multiplier) VALUES (?, ?, ?)`);
+
+      stmt.run("Morangos Comuns", 10, 1);
+      stmt.run("Morangos Doces", 20, 2);
+      stmt.run("Morangos de Ouro", 50, 5);
+      stmt.run("Morangos Raros", 100, 10);
+      stmt.run("Morangos Lendários", 200, 20);
+      stmt.run("Morangos Celestiais", 500, 50);
+
+      stmt.finalize();
+      console.log('Upgrades inseridos com sucesso');
     } else {
-      console.log('Morangos Comuns inserido com ID:', this.lastID);
+      console.log('Os upgrades já estão presentes, não é necessário inserir novamente.');
     }
   });
-  
-  stmt.run("Morangos Doces", 20, 2, function (err) {
-    if (err) {
-      console.error('Erro ao inserir Morangos Doces:', err);
-    } else {
-      console.log('Morangos Doces inserido com ID:', this.lastID);
-    }
-  });
-  
-  stmt.run("Morangos de Ouro", 50, 5, function (err) {
-    if (err) {
-      console.error('Erro ao inserir Morangos de Ouro:', err);
-    } else {
-      console.log('Morangos de Ouro inserido com ID:', this.lastID);
-    }
-  });
-  
-  stmt.run("Morangos Raros", 100, 10, function (err) {
-    if (err) {
-      console.error('Erro ao inserir Morangos Raros:', err);
-    } else {
-      console.log('Morangos Raros inserido com ID:', this.lastID);
-    }
-  });
-  
-  stmt.run("Morangos Lendários", 200, 20, function (err) {
-    if (err) {
-      console.error('Erro ao inserir Morangos Lendários:', err);
-    } else {
-      console.log('Morangos Lendários inserido com ID:', this.lastID);
-    }
-  });
-  
-  stmt.run("Morangos Celestiais", 500, 50, function (err) {
-    if (err) {
-      console.error('Erro ao inserir Morangos Celestiais:', err);
-    } else {
-      console.log('Morangos Celestiais inserido com ID:', this.lastID);
-    }
-  });
-  
-  stmt.finalize();
 });
+
 
 // Rota de registro de usuário
 app.post('/register', (req, res) => {
   const { username, password } = req.body;
   const hashedPassword = bcrypt.hashSync(password, 8);
 
-  console.log("Dados de registro:", username, password);
-
   db.run(`INSERT INTO users (username, password) VALUES (?, ?)`, [username, hashedPassword], function (err) {
     if (err) {
       console.error("Erro ao registrar usuário:", err.message);
       return res.status(500).send("Erro ao registrar usuário.");
     }
-
-    console.log("Usuário registrado com sucesso, ID:", this.lastID);
 
     db.run(`INSERT INTO user_progress (user_id, strawberries, upgrades) VALUES (?, ?, ?)`, [this.lastID, 0, '[]'], function (err) {
       if (err) {
@@ -146,10 +111,6 @@ app.post('/register', (req, res) => {
 // Rota de login de usuário
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).send("Username e password são necessários.");
-  }
 
   db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
     if (err || !user) {
@@ -174,13 +135,11 @@ app.post('/login', (req, res) => {
 function verifyToken(req, res, next) {
   const token = req.headers['x-access-token'];
   if (!token) {
-    console.log("Nenhum token fornecido.");
     return res.status(403).send({ auth: false, message: 'Nenhum token fornecido.' });
   }
 
   jwt.verify(token, SECRET_KEY, (err, decoded) => {
     if (err) {
-      console.log("Erro na verificação do token:", err);
       return res.status(500).send({ auth: false, message: 'Falha na autenticação do token.' });
     }
 
@@ -189,16 +148,6 @@ function verifyToken(req, res, next) {
   });
 }
 
-// Rota para obter informações do usuário
-app.get('/profile', verifyToken, (req, res) => {
-  db.get(`SELECT username FROM users WHERE id = ?`, [req.userId], (err, user) => {
-    if (err || !user) {
-      return res.status(500).send("Erro ao buscar informações do usuário.");
-    }
-    res.status(200).send({ username: user.username });
-  });
-});
-
 // Rota para colher morango (equivalente a /morangos/click)
 app.post('/harvest', verifyToken, (req, res) => {
   db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
@@ -206,9 +155,9 @@ app.post('/harvest', verifyToken, (req, res) => {
       return res.status(500).send("Erro ao colher morangos.");
     }
 
-    let upgrades = JSON.parse(row.upgrades);
-    let totalMultiplier = upgrades.reduce((sum, upgrade) => sum + upgrade.multiplier, 0);
-    let increment = totalMultiplier || 1; // Se não tiver upgrades, incrementa em 1
+    let upgrades = JSON.parse(row.upgrades || '[]');
+    let totalMultiplier = upgrades.reduce((sum, upgrade) => sum + (upgrade.multiplier || 0), 0);
+    let increment = totalMultiplier > 0 ? totalMultiplier : 1; // Se não houver upgrades, incrementa em 1
 
     const newCount = row.strawberries + increment;
     db.run(`UPDATE user_progress SET strawberries = ? WHERE user_id = ?`, [newCount, req.userId], function (err) {
@@ -219,40 +168,54 @@ app.post('/harvest', verifyToken, (req, res) => {
     });
   });
 });
-
-// Rota para comprar upgrade
+// Rota para comprar upgrades
 app.post('/buy', verifyToken, (req, res) => {
   const { id } = req.body;
 
+  // Verifica se o ID do upgrade foi fornecido
   if (!id) {
-    return res.status(400).send("ID do upgrade é necessário.");
+    return res.status(400).send("ID do upgrade não fornecido.");
   }
 
-  db.get(`SELECT * FROM strawberries WHERE id = ?`, [id], (err, strawberry) => {
-    if (err || !strawberry) {
-      return res.status(400).send("Upgrade não encontrado.");
+  // Busca o upgrade pelo ID
+  db.get(`SELECT * FROM strawberries WHERE id = ?`, [id], (err, upgrade) => {
+    if (err || !upgrade) {
+      return res.status(404).send("Upgrade não encontrado.");
     }
 
-    db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, progress) => {
-      if (err || !progress) {
-        return res.status(500).send("Erro ao buscar progresso do jogador.");
+    // Busca o progresso do usuário
+    db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
+      if (err || !row) {
+        return res.status(500).send("Erro ao buscar progresso do usuário.");
       }
 
-      if (progress.strawberries < strawberry.cost) {
-        return res.status(400).send("Morango insuficiente para comprar esse upgrade.");
+      let strawberries = row.strawberries;
+      let upgrades = JSON.parse(row.upgrades || '[]');
+
+      // Verifica se o usuário tem morangos suficientes para comprar o upgrade
+      if (strawberries < upgrade.cost) {
+        return res.status(400).send("Morangos insuficientes para comprar o upgrade.");
       }
 
-      const newStrawberries = progress.strawberries - strawberry.cost;
-      let upgrades = JSON.parse(progress.upgrades);
-      upgrades.push(strawberry);
+      // Atualiza a quantidade de morangos do usuário
+      strawberries -= upgrade.cost;
 
-      db.run(`UPDATE user_progress SET strawberries = ?, upgrades = ? WHERE user_id = ?`,
-        [newStrawberries, JSON.stringify(upgrades), req.userId], function (err) {
-          if (err) {
-            return res.status(500).send("Erro ao atualizar progresso.");
-          }
-          res.status(200).send({ strawberries: newStrawberries, upgrades });
-        });
+      // Verifica se o upgrade já foi comprado
+      const existingUpgrade = upgrades.find(u => u.id === id);
+      if (existingUpgrade) {
+        existingUpgrade.quantity += 1;
+      } else {
+        upgrades.push({ ...upgrade, quantity: 1 });
+      }
+
+      // Atualiza o banco de dados
+      db.run(`UPDATE user_progress SET strawberries = ?, upgrades = ? WHERE user_id = ?`, [strawberries, JSON.stringify(upgrades), req.userId], (err) => {
+        if (err) {
+          return res.status(500).send("Erro ao atualizar progresso do usuário.");
+        }
+
+        res.status(200).send({ strawberries, upgrades: JSON.stringify(upgrades) });
+      });
     });
   });
 });
