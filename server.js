@@ -26,7 +26,8 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE,
-    password TEXT
+    password TEXT,
+    strawberries INTEGER DEFAULT 0
   )`, (err) => {
     if (err) {
       console.error('Erro ao criar a tabela users:', err);
@@ -85,7 +86,6 @@ db.serialize(() => {
     }
   });
 });
-
 
 // Rota de registro de usuário
 app.post('/register', (req, res) => {
@@ -168,55 +168,62 @@ app.post('/harvest', verifyToken, (req, res) => {
     });
   });
 });
+
 // Rota para comprar upgrades
 app.post('/buy', verifyToken, (req, res) => {
   const { id } = req.body;
-
-  // Verifica se o ID do upgrade foi fornecido
-  if (!id) {
-    return res.status(400).send("ID do upgrade não fornecido.");
-  }
-
-  // Busca o upgrade pelo ID
-  db.get(`SELECT * FROM strawberries WHERE id = ?`, [id], (err, upgrade) => {
+  const userId = req.userId; // Corrigido para req.userId
+  
+  db.get("SELECT * FROM strawberries WHERE id = ?", [id], (err, upgrade) => { // Corrigido para 'strawberries'
     if (err || !upgrade) {
-      return res.status(404).send("Upgrade não encontrado.");
+      return res.status(404).send({ error: "Upgrade não encontrado" });
     }
-
-    // Busca o progresso do usuário
-    db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
-      if (err || !row) {
-        return res.status(500).send("Erro ao buscar progresso do usuário.");
+    
+    db.get("SELECT strawberries FROM user_progress WHERE user_id = ?", [userId], (err, user) => {
+      if (err || !user) {
+        return res.status(500).send({ error: "Erro ao buscar morangos do usuário" });
       }
-
-      let strawberries = row.strawberries;
-      let upgrades = JSON.parse(row.upgrades || '[]');
-
-      // Verifica se o usuário tem morangos suficientes para comprar o upgrade
-      if (strawberries < upgrade.cost) {
-        return res.status(400).send("Morangos insuficientes para comprar o upgrade.");
+      
+      if (user.strawberries < upgrade.cost) {
+        return res.status(400).send({ error: "Morangos insuficientes" });
       }
-
-      // Atualiza a quantidade de morangos do usuário
-      strawberries -= upgrade.cost;
-
-      // Verifica se o upgrade já foi comprado
-      const existingUpgrade = upgrades.find(u => u.id === id);
-      if (existingUpgrade) {
-        existingUpgrade.quantity += 1;
-      } else {
-        upgrades.push({ ...upgrade, quantity: 1 });
-      }
-
-      // Atualiza o banco de dados
-      db.run(`UPDATE user_progress SET strawberries = ?, upgrades = ? WHERE user_id = ?`, [strawberries, JSON.stringify(upgrades), req.userId], (err) => {
+      
+      // Atualiza os morangos e o upgrade do usuário
+      db.run("UPDATE user_progress SET strawberries = strawberries - ? WHERE user_id = ?", [upgrade.cost, userId], (err) => {
         if (err) {
-          return res.status(500).send("Erro ao atualizar progresso do usuário.");
+          return res.status(500).send({ error: "Erro ao atualizar morangos do usuário" });
         }
 
-        res.status(200).send({ strawberries, upgrades: JSON.stringify(upgrades) });
+        // Adiciona o upgrade ao progresso do usuário
+        db.get("SELECT upgrades FROM user_progress WHERE user_id = ?", [userId], (err, row) => {
+          if (err) {
+            return res.status(500).send({ error: "Erro ao buscar upgrades do usuário" });
+          }
+
+          let upgrades = JSON.parse(row.upgrades || '[]');
+          upgrades.push(upgrade); // Adiciona o novo upgrade à lista
+
+          db.run("UPDATE user_progress SET upgrades = ? WHERE user_id = ?", [JSON.stringify(upgrades), userId], (err) => {
+            if (err) {
+              return res.status(500).send({ error: "Erro ao atualizar upgrades do usuário" });
+            }
+
+            res.json({ strawberries: user.strawberries - upgrade.cost, upgrades });
+          });
+        });
       });
     });
+  });
+});
+
+// Rota para obter upgrades
+app.get('/upgrades', (req, res) => {
+  db.all("SELECT * FROM strawberries", (err, rows) => { // Corrigido para 'strawberries'
+    if (err) {
+      res.status(500).send({ error: "Erro ao buscar upgrades" });
+    } else {
+      res.json(rows);
+    }
   });
 });
 
