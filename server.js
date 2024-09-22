@@ -36,9 +36,9 @@ db.serialize(() => {
     }
   });
 
-  // Criar tabela de morangos (upgrades)
+  // Criar tabela de upgrades de morangos
   db.run(`CREATE TABLE IF NOT EXISTS strawberries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,   
     name TEXT,
     cost INTEGER,
     multiplier INTEGER
@@ -107,15 +107,7 @@ app.post('/register', (req, res) => {
     });
   });
 });
-app.get('/profile', verifyToken, (req, res) => {
-  const { username, } = req.body;
-  db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
-    if (err || !users) {
-      return res.status(500).send("Erro ao buscar informações do usuário.");
-    }
-    res.status(200).send({ username: user.username });
-  });
-});
+
 // Rota de login de usuário
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
@@ -156,7 +148,7 @@ function verifyToken(req, res, next) {
   });
 }
 
-// Rota para colher morango (equivalente a /morangos/click)
+// Rota para colher morango
 app.post('/harvest', verifyToken, (req, res) => {
   db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
     if (err || !row) {
@@ -165,7 +157,7 @@ app.post('/harvest', verifyToken, (req, res) => {
 
     let upgrades = JSON.parse(row.upgrades || '[]');
     let totalMultiplier = upgrades.reduce((sum, upgrade) => sum + (upgrade.multiplier || 0), 0);
-    let increment = totalMultiplier > 0 ? totalMultiplier : 1; // Se não houver upgrades, incrementa em 1
+    let increment = totalMultiplier > 0 ? totalMultiplier : 1;
 
     const newCount = row.strawberries + increment;
     db.run(`UPDATE user_progress SET strawberries = ? WHERE user_id = ?`, [newCount, req.userId], function (err) {
@@ -177,6 +169,7 @@ app.post('/harvest', verifyToken, (req, res) => {
   });
 });
 
+// Rota para comprar upgrades
 // Rota para comprar upgrades
 app.post('/buy', verifyToken, (req, res) => {
   const { id } = req.body;
@@ -234,6 +227,35 @@ app.get('/upgrades', (req, res) => {
     }
   });
 });
+
+// Rota para obter o progresso do usuário
+app.get('/progress', verifyToken, (req, res) => {
+  db.get(`SELECT strawberries, upgrades FROM user_progress WHERE user_id = ?`, [req.userId], (err, row) => {
+    if (err || !row) {
+      return res.status(500).send({ error: "Erro ao buscar progresso do usuário" });
+    }
+
+    res.status(200).send({
+      strawberries: row.strawberries,
+      upgrades: JSON.parse(row.upgrades || '[]')
+    });
+  });
+});
+
+// Rota para o perfil do usuário (nome e morangos)
+app.get('/profile', verifyToken, (req, res) => {
+  db.get(`SELECT u.username, up.strawberries FROM users u
+    JOIN user_progress up ON u.id = up.user_id
+    WHERE u.id = ?`, [req.userId], (err, row) => {
+    if (err || !row) {
+      return res.status(500).send({ error: "Erro ao buscar perfil do usuário" });
+    }
+
+    res.status(200).send({ username: row.username, strawberries: row.strawberries });
+  });
+});
+// Endpoint para obter os upgrades do usuário
+
 
 app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
